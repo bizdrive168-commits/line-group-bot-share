@@ -1,9 +1,11 @@
 // ตัวตนของบอท — ชื่อ / คำแทนตัวเอง / อิโมจิ / คำลงท้าย ตั้งได้จาก .env ที่เดียว
 //
-//   BOT_NAME=น้องมะลิ      → คำตอบของ AI และข้อความทักทายใช้ชื่อนี้ทั้งหมด
+//   ไม่ตั้งอะไร             → ใช้ชื่อ LINE Official Account เอง (app.js อ่านตอนบูต) ไม่ต้องกรอกตอนติดตั้ง
+//   BOT_NAME=น้องมะลิ      → ตั้งชื่อเองทับชื่อ OA
 //   BOT_POLITE=ชาย         → เปลี่ยนคำลงท้ายเป็น ครับ ทั้งบอท
 //
 // ไฟล์อื่นห้ามฮาร์ดโค้ดชื่อบอทเอง ให้ import จากที่นี่เสมอ
+// BOT / SELF เปลี่ยนได้หลังบูต (ชื่อจาก LINE) → ไฟล์อื่นต้องอ่านเป็น branding.BOT ตอนใช้ ห้าม destructure เก็บไว้
 
 // คำแทนตัวเองของบอท — เดาจากชื่อให้อัตโนมัติ ลูกค้าจะได้ตั้งแค่ BOT_NAME ค่าเดียวก็ใช้ได้
 // "น้องมะลิ" → เรียกตัวเองว่า "น้อง" / "พี่หมี" → "พี่" / "MayBot" → เรียกชื่อตัวเองเต็ม
@@ -25,7 +27,7 @@ function toMale(text) {
 
 // อ่านค่าจาก env (แยกเป็นฟังก์ชันบริสุทธิ์ไว้ให้เทสเรียกได้โดยไม่ต้องยุ่งกับ process.env)
 function resolve(env = {}) {
-  const name = String(env.BOT_NAME || '').trim() || 'น้องฟ้าใส';
+  const name = String(env.BOT_NAME || '').trim() || 'แอดมิน'; // ไม่ได้ตั้ง + อ่านชื่อ OA ไม่ได้
   const male = ['ชาย', 'ผู้ชาย', 'male', 'ครับ'].includes(String(env.BOT_POLITE || '').trim().toLowerCase());
   const say = male ? toMale : (t) => String(t);
   return {
@@ -39,4 +41,20 @@ function resolve(env = {}) {
   };
 }
 
-module.exports = { ...resolve(process.env), resolve, guessSelf, toMale };
+// ชื่อ LINE OA ส่วนใหญ่เป็นชื่อร้าน ("ร้านบ้านมะลิ") → เรียกตัวเองว่า "แอดมิน" ฟังเป็นธรรมชาติกว่าเรียกชื่อร้าน
+// ขึ้นต้นด้วย น้อง/พี่ ("น้องมะลิ") ยังเดาแบบเดิม
+function selfFromLineName(name) {
+  const g = guessSelf(name);
+  return g === name ? 'แอดมิน' : g;
+}
+
+// ไม่ได้ตั้ง BOT_NAME → ใช้ชื่อ LINE OA ที่ app.js อ่านมาตอนบูต (ตั้ง BOT_NAME ไว้ = ชื่อนั้นชนะเสมอ)
+function useLineName(displayName, env = process.env) {
+  const name = String(displayName || '').trim();
+  if (!name || String(env.BOT_NAME || '').trim()) return false;
+  module.exports.BOT = name;
+  module.exports.SELF = String(env.BOT_SELF || '').trim() || selfFromLineName(name);
+  return true;
+}
+
+module.exports = { ...resolve(process.env), resolve, guessSelf, selfFromLineName, toMale, useLineName };

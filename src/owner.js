@@ -4,7 +4,8 @@
 // ลูกค้าทั่วไปไม่มีทางพิมพ์รหัสสุ่มยาวๆ ตรงเป๊ะ → ไม่ต้องมีคำสั่งพิเศษให้ลูกค้าเผลอชน
 const crypto = require('crypto');
 const dayjs = require('./time');
-const { BOT, EMOJI } = require('./branding');
+const branding = require('./branding');
+const { EMOJI } = branding;
 const brief = require('./brief');
 
 const MIN_CODE = 8;
@@ -106,11 +107,37 @@ function menuText() {
 • วันนี้มีลูกค้าทักกี่คน ใครสั่งอะไรบ้าง
 • ใครส่งสลิปมาบ้าง ยอดเท่าไหร่
 • สรุปแชทคุณพลอย
-• มีใครถามเรื่องที่${BOT}ตอบไม่ได้บ้าง
+• มีใครถามเรื่องที่${branding.BOT}ตอบไม่ได้บ้าง
 
 แก้หน้าที่บอท: พิมพ์บอกได้เลย เช่น "แก้ราคาคุกกี้เป็น 130" หรือส่งรูปเมนูใหม่มา แล้วพิมพ์ ยืนยัน
 
 คำสั่ง: ดูหน้าที่ · ย้อนกลับ · ทดลองเป็นลูกค้า · กลับโหมดเจ้าของ · เลิกเป็นเจ้าของ · เมนู`;
+}
+
+// เจ้าของเพิ่งติดตั้ง ยังไม่มีหน้าที่ → ชวนเล่าแบบคุยกัน ไม่ต้องกรอกฟอร์ม (AI ร่างให้ โชว์ให้ดูก่อนใช้จริง)
+function setupText() {
+  return `ตอนนี้${branding.SELF}ยังไม่รู้ว่าต้องทำหน้าที่อะไร เล่าให้ฟังได้เลยค่ะ พิมพ์แบบคุยกันธรรมดา ไม่ต้องครบทีเดียว เช่น
+• ร้านขายเสื้อผ้าออนไลน์ เสื้อยืดตัวละ 290 ส่งไปรษณีย์ 50 บาท ช่วยตอบราคาและคิดยอดให้ลูกค้า
+• ร้านกาแฟ เปิด 7 โมงถึง 5 โมงเย็น หยุดวันจันทร์ (แล้วส่งรูปเมนูตามมา)
+• เป็นเลขาส่วนตัวให้ฉัน ช่วยจดงาน ถอดข้อความเสียง สรุปให้ตอนฉันถาม
+
+${branding.SELF}จะร่างหน้าที่ให้ดูก่อน พิมพ์ ยืนยัน ถึงจะใช้จริง · ข้อมูลไหนยังไม่มี บอกเพิ่มทีหลังได้เรื่อยๆ
+(พิมพ์ เมนู เพื่อดูคำสั่งทั้งหมด)`;
+}
+
+// ข้อความต้อนรับตอนพิมพ์รหัสเจ้าของ / กลับโหมดเจ้าของ — ยังไม่มีหน้าที่ = พาตั้งก่อน
+async function welcomeText(db, first = true) {
+  const hello = first ? `ยินดีต้อนรับค่ะ ${branding.SELF}จำได้แล้วว่าคุณเป็นเจ้าของ` : 'กลับมาโหมดเจ้าของแล้วค่ะ';
+  const hasBrief = !!(await brief.current(db)).TEXT;
+  return `${hello}\n\n${hasBrief ? menuText() : setupText()}`;
+}
+
+// ช่อง 〔...〕 ที่ยังเหลือ — บอกว่าใช้ไปก่อนได้ ลูกค้าถามเรื่องนั้นบอทจะไม่เดา
+function missingNote(text) {
+  const left = brief.placeholders(text);
+  if (!left.length) return '';
+  const shown = left.length > 8 ? `${left.slice(0, 8).join(' ')} และอีก ${left.length - 8} ช่อง` : left.join(' ');
+  return `\n\n⚠️ ยังมีช่องที่ไม่ได้กรอก: ${shown}\nใช้ไปก่อนได้ ลูกค้าถามเรื่องนี้ บอทจะบอกว่าทางร้านจะแจ้ง · มีข้อมูลเมื่อไหร่พิมพ์บอกได้เลย`;
 }
 
 // คำสั่งตายตัวของเจ้าของ — คืนข้อความตอบ หรือ null = ไม่ใช่คำสั่ง (ส่งต่อให้ AI)
@@ -121,7 +148,11 @@ async function ownerCommand(userId, text, db) {
 
   if (t === 'ดูหน้าที่') {
     const cur = await brief.current(db);
-    if (!cur.TEXT) return 'ยังไม่มีคำสั่งประจำตัวเลยค่ะ พิมพ์บอกได้เลยว่าอยากให้บอททำหน้าที่อะไร';
+    if (!cur.TEXT) {
+      const draft = await db.getPendingBrief(userId);
+      if (draft) return `ยังไม่ได้ใช้หน้าที่ไหนเลยค่ะ มีร่างรอยืนยันอยู่:\n\n${draft.text}\n\nพิมพ์ ยืนยัน เพื่อใช้ หรือพิมพ์บอกว่าอยากแก้ตรงไหน`;
+      return `ยังไม่มีคำสั่งประจำตัวเลยค่ะ\n\n${setupText()}`;
+    }
     const from = cur.SOURCE === 'chat' ? 'แก้ผ่านแชท' : 'จากไฟล์ brief.txt';
     return `คำสั่งประจำตัวที่ใช้อยู่ (${from} · ${cur.TEXT.length} ตัวอักษร):\n\n${cur.TEXT}`;
   }
@@ -131,7 +162,9 @@ async function ownerCommand(userId, text, db) {
     if (!pending) return 'ตอนนี้ไม่มีอะไรรอยืนยันค่ะ (ร่างที่ค้างเกิน 24 ชม. จะหมดอายุเอง)';
     await db.addBriefVersion('chat', pending.text, userId);
     await db.clearPendingBrief(userId);
-    return `ใช้คำสั่งใหม่แล้วค่ะ ✅ ลูกค้าที่ทักมาหลังจากนี้จะได้คำตอบตามนี้ทันที\nพิมพ์ ทดลองเป็นลูกค้า เพื่อลองคุยดูได้ · เปลี่ยนใจพิมพ์ ย้อนกลับ`;
+    const left = brief.placeholders(pending.text).length;
+    const more = left ? `\nยังขาดข้อมูล ${left} ช่อง พิมพ์บอกเพิ่มได้เรื่อยๆ` : '';
+    return `ใช้คำสั่งใหม่แล้วค่ะ ✅ ลูกค้าที่ทักมาหลังจากนี้จะได้คำตอบตามนี้ทันที${more}\nพิมพ์ ทดลองเป็นลูกค้า เพื่อลองคุยดูได้ · เปลี่ยนใจพิมพ์ ย้อนกลับ`;
   }
 
   if (t === 'ยกเลิก') {
@@ -149,7 +182,7 @@ async function ownerCommand(userId, text, db) {
 
   if (t === 'ทดลองเป็นลูกค้า') {
     await db.setOwnerMode(userId, 'customer');
-    return `ตอนนี้คุยกับ${BOT}แบบลูกค้าแล้วค่ะ ลองถามได้เลย (แชทช่วงนี้ไม่นับในรายงานลูกค้า)\nเสร็จแล้วพิมพ์ กลับโหมดเจ้าของ`;
+    return `ตอนนี้คุยกับ${branding.BOT}แบบลูกค้าแล้วค่ะ ลองถามได้เลย (แชทช่วงนี้ไม่นับในรายงานลูกค้า)\nเสร็จแล้วพิมพ์ กลับโหมดเจ้าของ`;
   }
 
   if (t === 'เลิกเป็นเจ้าของ') {
@@ -167,12 +200,15 @@ async function proposeBrief(userId, reply, newBrief, db) {
   if (text.length > brief.MAX_CHARS) {
     return `${reply}\n\n⚠️ ร่างใหม่ยาว ${text.length} ตัวอักษร เกิน ${brief.MAX_CHARS} ที่ระบบรับได้ ยังไม่ได้เปลี่ยนอะไรนะคะ ลองสั่งให้ตัดส่วนที่ไม่จำเป็นออก`;
   }
+  // ยังไม่มีฉบับไหนใช้อยู่ (เพิ่งติดตั้ง) → โชว์ร่างทั้งฉบับ ทุกบรรทัดใหม่หมด ดูแบบจุดเปลี่ยนจะโดนตัดเหลือ 20 บรรทัด
+  if (!cur) {
+    await db.setPendingBrief(userId, text);
+    return `${reply}\n\nร่างหน้าที่${branding.BOT}:\n\n${text}${missingNote(text)}\n\nพิมพ์ ยืนยัน เพื่อใช้ทันที · อยากแก้ตรงไหนพิมพ์บอกได้เลย · ยกเลิก = ทิ้งร่าง`;
+  }
   const diff = lineDiff(cur, text);
   if (!diff.length) return `${reply}\n\n(คำสั่งประจำตัวเหมือนเดิมทุกตัวอักษร ไม่มีอะไรต้องเปลี่ยน)`;
   await db.setPendingBrief(userId, text);
-  const left = brief.placeholders(text);
-  const warn = left.length ? `\n\n⚠️ ยังมีช่องที่ไม่ได้กรอก: ${left.join(' ')}` : '';
-  return `${reply}\n\nจุดที่จะเปลี่ยน:\n${diff.join('\n')}${warn}\n\nพิมพ์ ยืนยัน เพื่อใช้ทันที หรือ ยกเลิก`;
+  return `${reply}\n\nจุดที่จะเปลี่ยน:\n${diff.join('\n')}${missingNote(text)}\n\nพิมพ์ ยืนยัน เพื่อใช้ทันที หรือ ยกเลิก`;
 }
 
-module.exports = { ownerCode, isOwnerCode, buildReport, lineDiff, menuText, ownerCommand, proposeBrief, MIN_CODE };
+module.exports = { ownerCode, isOwnerCode, buildReport, lineDiff, menuText, setupText, welcomeText, ownerCommand, proposeBrief, MIN_CODE };

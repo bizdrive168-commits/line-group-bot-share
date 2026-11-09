@@ -6,7 +6,7 @@ const line = require('@line/bot-sdk');
 const dayjs = require('./time');
 const db = require('./db');
 const { createBot } = require('./bot');
-const { BOT } = require('./branding');
+const branding = require('./branding');
 const brief = require('./brief');
 const { ownerCode, MIN_CODE } = require('./owner');
 
@@ -18,17 +18,36 @@ function background(promise) {
   if (ON_VERCEL) require('@vercel/functions').waitUntil(promise);
 }
 
+const client = new line.messagingApi.MessagingApiClient({
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
+});
+
+// ไม่ได้ตั้ง BOT_NAME → ใช้ชื่อ LINE Official Account (ไม่ต้องกรอกชื่อซ้ำตอนติดตั้ง) · อ่านไม่ได้ก็ใช้ชื่อสำรอง ไม่ล้ม
+async function useLineName() {
+  if (String(process.env.BOT_NAME || '').trim() || !process.env.LINE_CHANNEL_ACCESS_TOKEN) return;
+  let timer;
+  try {
+    const slow = new Promise((_, no) => (timer = setTimeout(() => no(new Error('timeout')), 5000)));
+    const info = await Promise.race([client.getBotInfo(), slow]);
+    if (branding.useLineName(info?.displayName)) console.log(`[name] ใช้ชื่อจาก LINE OA: ${branding.BOT} (เรียกตัวเองว่า ${branding.SELF})`);
+  } catch (e) {
+    console.warn(`[name] อ่านชื่อ LINE OA ไม่ได้ (${e.message}) — ใช้ชื่อ "${branding.BOT}" ไปก่อน · ตั้ง BOT_NAME เองได้`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // เตรียมระบบครั้งเดียวต่อโปรเซส (Vercel = ต่อ cold start): สร้างตาราง + อ่าน brief.txt ว่าเปลี่ยนไหม
 let started = null;
 function startup() {
   started ??= (async () => {
-    await db.init();
+    await Promise.all([db.init(), useLineName()]);
     const active = await brief.syncBoot(db);
     const missing = ['LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_SECRET', 'OPENROUTER_API_KEY'].filter((k) => !process.env[k]);
     if (missing.length) console.warn(`⚠️  ยังไม่ได้ตั้งค่า: ${missing.join(', ')} — บอทจะยังตอบแชทไม่ได้จนกว่าจะตั้งครบ ดูวิธีใน INSTALL.md`);
     console.log(
       active.SOURCE === 'none'
-        ? '[brief] ยังไม่มีคำสั่งประจำตัว (brief.txt) — บอทจะเป็นผู้ช่วยทั่วไป'
+        ? `[brief] ยังไม่มีหน้าที่ — ${ownerCode() ? 'เจ้าของพิมพ์ OWNER_CODE หาบอทในแชท แล้วเล่าให้ฟังว่าอยากให้ทำอะไร' : 'ตั้ง OWNER_CODE เพื่อบอกหน้าที่ผ่านแชท LINE (หรือเขียน brief.txt)'}`
         : `[brief] ใช้คำสั่งประจำตัว${active.SOURCE === 'chat' ? 'ที่เจ้าของแก้ผ่านแชท' : 'จากไฟล์'} (${active.TEXT.length} ตัวอักษร)`,
     );
     if (!process.env.OWNER_CODE) console.log('[owner] ยังไม่ได้ตั้ง OWNER_CODE — ปิดโหมดเจ้าของ');
@@ -44,9 +63,6 @@ function startup() {
   return started;
 }
 
-const client = new line.messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
-});
 const bot = createBot({ client });
 
 const app = express();
@@ -87,7 +103,7 @@ app.get('/health', async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-app.get('/', (_req, res) => res.type('text/plain').send(`${BOT} ทำงานอยู่ — ตั้ง Webhook URL ใน LINE เป็น <ที่อยู่นี้>/webhook`));
+app.get('/', (_req, res) => res.type('text/plain').send(`${branding.BOT} ทำงานอยู่ — ตั้ง Webhook URL ใน LINE เป็น <ที่อยู่นี้>/webhook`));
 
 // ดาวน์โหลดไฟล์ฐานข้อมูลไว้สำรอง (bin/backup-db.sh เรียกทุกคืน) — ต้องมี ADMIN_KEY · ใช้ Turso ให้สำรองที่หน้าเว็บ Turso
 app.get('/admin/backup', async (req, res) => {

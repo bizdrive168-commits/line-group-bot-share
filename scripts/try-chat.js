@@ -3,7 +3,8 @@
 require('dotenv').config();
 const readline = require('readline');
 const { chatReply } = require('../src/ai');
-const { BOT, say } = require('../src/branding');
+const branding = require('../src/branding');
+const { say } = branding;
 const brief = require('../src/brief');
 const { guardNumbers } = require('../src/guard');
 
@@ -14,10 +15,10 @@ if (!process.env.OPENROUTER_API_KEY) {
 
 // อ่าน brief.txt ตรงๆ (ไม่ผ่านฐานข้อมูล) — ลองไฟล์ที่เพิ่งแก้ได้ทันที
 const local = brief.resolve(process.env);
-console.log(`คุยกับ ${BOT} (โหมดลองในเครื่อง ไม่บันทึกลงฐานข้อมูล)`);
+console.log(`คุยกับ ${branding.BOT} (โหมดลองในเครื่อง ไม่บันทึกลงฐานข้อมูล)`);
 console.log(
   local.SOURCE === 'none'
-    ? 'ยังไม่มี brief.txt — บอทจะตอบแบบผู้ช่วยทั่วไป'
+    ? 'ยังไม่มี brief.txt — บอทจะตอบแบบยังไม่รู้ข้อมูลร้าน (ของจริงบอกหน้าที่ผ่านแชท LINE ในโหมดเจ้าของได้)'
     : `ใช้คำสั่งประจำตัว ${local.TEXT.length} ตัวอักษร จาก ${local.SOURCE === 'env' ? 'BOT_BRIEF ใน .env' : 'brief.txt'}`,
 );
 const left = brief.placeholders(local.TEXT);
@@ -43,7 +44,7 @@ async function handle(line) {
     if (guarded.removed.length) console.log(`\n[ด่าน] ตัดตัวเลขที่ไม่มีในข้อมูลออก: ${guarded.removed.join(', ')}`);
     const answer = say(guarded.text);
     rows.push({ role: 'bot', type: 'text', text: answer, ts: new Date().toISOString() });
-    console.log(`\n${BOT}: ${answer}\n`);
+    console.log(`\n${branding.BOT}: ${answer}\n`);
   } catch (e) {
     console.error(`\n❌ เรียก AI ไม่สำเร็จ: ${e.message}\n`);
   }

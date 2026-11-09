@@ -92,6 +92,31 @@ async function syncBoot(db = require('./db'), env = process.env, opts) {
   return now;
 }
 
+// แบบสำเร็จรูปใน briefs/ — ส่งให้ AI โหมดเจ้าของใช้เป็นโครง ตอนเจ้าของเพิ่งติดตั้งแล้วเล่าว่าอยากให้บอททำอะไร
+// เจ้าของจะได้ไม่ต้องเลือกแบบหรือกรอกไฟล์เองตอนติดตั้ง · อ่านไม่ได้ = ไม่มีแบบ (AI ใช้โครง 4 หัวข้อแทน) ไม่ล้ม
+const TEMPLATE_DIR = path.join(__dirname, '..', 'briefs');
+let cachedTemplates = null;
+function templates(dir = TEMPLATE_DIR) {
+  if (dir === TEMPLATE_DIR && cachedTemplates) return cachedTemplates;
+  let list = [];
+  try {
+    list = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.txt'))
+      .sort()
+      .map((f) => {
+        const raw = fs.readFileSync(path.join(dir, f), 'utf8');
+        const m = raw.split('\n')[0].match(/^#\s*แบบ:\s*(.+?)\s+—/); // "# แบบ: ร้านอาหาร / คาเฟ่ — ..."
+        return { file: f, label: m ? m[1].trim() : f.replace(/\.txt$/, ''), text: clean(raw) };
+      })
+      .filter((t) => t.text);
+  } catch {
+    list = [];
+  }
+  if (dir === TEMPLATE_DIR) cachedTemplates = list;
+  return list;
+}
+
 // ฉบับที่ใช้อยู่ = ฉบับล่าสุดในฐานข้อมูล
 async function current(db = require('./db')) {
   const row = await db.latestBrief();
@@ -107,6 +132,7 @@ module.exports = {
   scrubPlaceholders,
   syncBoot,
   current,
+  templates,
   MAX_CHARS,
   DEFAULT_FILE,
 };

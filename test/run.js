@@ -61,7 +61,17 @@ async function main() {
   // ===== ชื่อบอท ตั้งเองจาก .env =====
   check('ชื่อบอทมาจาก BOT_NAME', branding.BOT === 'น้องมะลิ');
   check('เดาคำแทนตัวจากชื่อ: น้องมะลิ → น้อง', branding.SELF === 'น้อง');
-  check('ไม่ตั้งอะไรเลย = น้องฟ้าใส', branding.resolve({}).BOT === 'น้องฟ้าใส');
+  check('ไม่ตั้งอะไรเลย + อ่านชื่อ OA ไม่ได้ = แอดมิน', branding.resolve({}).BOT === 'แอดมิน');
+  check('ตั้ง BOT_NAME ไว้ → ไม่เอาชื่อ OA มาทับ', branding.useLineName('ร้านบ้านมะลิ', { BOT_NAME: 'น้องมะลิ' }) === false && branding.BOT === 'น้องมะลิ');
+  {
+    const keep = { BOT: branding.BOT, SELF: branding.SELF };
+    branding.useLineName('ร้านบ้านมะลิ', {});
+    check('ไม่ตั้ง BOT_NAME → ใช้ชื่อ LINE OA + เรียกตัวเองว่าแอดมิน', branding.BOT === 'ร้านบ้านมะลิ' && branding.SELF === 'แอดมิน');
+    check('ชื่อจาก LINE เข้า prompt + คำทักทายทันที (ไม่ต้องรีสตาร์ท)', systemPrompt({}).includes('"ร้านบ้านมะลิ"') && greeting({}).includes('ร้านบ้านมะลิ'));
+    branding.useLineName('น้องใบเตย', {});
+    check('ชื่อ OA ขึ้นต้นน้อง → เรียกตัวเองว่าน้อง', branding.SELF === 'น้อง');
+    Object.assign(branding, keep);
+  }
   check('ชื่อขึ้นต้น พี่ → เรียกตัวเองว่า พี่', branding.guessSelf('พี่หมี') === 'พี่');
   check('ชื่อฝรั่ง → เรียกชื่อตัวเองเต็ม', branding.guessSelf('MayBot') === 'MayBot');
   check('BOT_SELF สั่งทับได้', branding.resolve({ BOT_NAME: 'น้องมะลิ', BOT_SELF: 'มะลิ' }).SELF === 'มะลิ');
@@ -106,6 +116,35 @@ async function main() {
 
   // ===== คำสั่งประจำตัว: ฉบับล่าสุดชนะ =====
   check('ยังไม่บูต = ยังไม่มีฉบับไหน', (await brief.current(db)).SOURCE === 'none');
+
+  // ===== ติดตั้งแบบไม่ต้องกรอกหน้าที่: เจ้าของเล่าให้บอทฟังผ่านแชททีหลัง =====
+  {
+    const client = fakeClient(), ai = fakeAI();
+    const bot = createBot({ client, ai, media: fakeMedia, env: ENV });
+    await bot.handleEvent(textEvent('U-new', 'มีเสื้อไหม'));
+    check('ยังไม่มีหน้าที่ → ลูกค้าทักมายังตอบได้ (AI ได้คำสั่งว่าง)', ai.seen[0]?.opts.briefText === '');
+    await bot.handleEvent(textEvent('U-setup', CODE));
+    check('เจ้าของใหม่ + ยังไม่มีหน้าที่ → ชวนเล่าว่าอยากให้ทำอะไร', client.last().includes('ยังไม่รู้ว่าต้องทำหน้าที่อะไร') && client.last().includes('ยืนยัน'));
+    ai.ownerOut = { reply: 'ร่างเป็นแอดมินร้านเสื้อให้แล้วค่ะ', newBrief: 'คุณคือแอดมินร้านเสื้อ\n- เสื้อยืด 290 บาท\n- โอนเข้า 〔เลขบัญชี〕' };
+    await bot.handleEvent(textEvent('U-setup', 'ขายเสื้อยืด ตัวละ 290'));
+    const first = client.last();
+    check('ร่างแรก → โชว์ทั้งฉบับ (ไม่ใช่จุดเปลี่ยน) + บอกช่องที่ขาด', first.includes('ร่างหน้าที่') && first.includes('คุณคือแอดมินร้านเสื้อ') && !first.includes('+ ') && first.includes('〔เลขบัญชี〕') && first.includes('ใช้ไปก่อนได้'));
+    check('ร่างแรกยังไม่ใช้จนกว่าจะยืนยัน', (await brief.current(db)).SOURCE === 'none');
+    ai.ownerOut = { reply: 'เพิ่มค่าส่งแล้วค่ะ', newBrief: 'คุณคือแอดมินร้านเสื้อ\n- เสื้อยืด 290 บาท\n- ค่าส่ง 50 บาท\n- โอนเข้า 〔เลขบัญชี〕' };
+    await bot.handleEvent(textEvent('U-setup', 'ค่าส่ง 50'));
+    check('บอกเพิ่มต่อ → AI ได้ร่างเดิมไปแก้ต่อ (ของที่เพิ่งบอกไม่หาย)', ai.ownerSeen[1]?.opts.draftText.includes('เสื้อยืด 290') && ai.ownerSeen[1].opts.briefText === '');
+    await bot.handleEvent(textEvent('U-setup', 'ดูหน้าที่'));
+    check('ดูหน้าที่ตอนยังไม่ยืนยัน → เห็นร่างที่รอ', client.last().includes('ร่างรอยืนยัน') && client.last().includes('ค่าส่ง 50'));
+    await bot.handleEvent(textEvent('U-setup', 'ยืนยัน'));
+    check('ยืนยันร่างแรก → ใช้ทันที + บอกว่ายังขาดกี่ช่อง', (await brief.current(db)).TEXT.includes('ค่าส่ง 50') && client.last().includes('ขาดข้อมูล 1 ช่อง'));
+    await bot.handleEvent(textEvent('U-setup', 'ทดลองเป็นลูกค้า'));
+    await bot.handleEvent(textEvent('U-setup', 'กลับโหมดเจ้าของ'));
+    check('มีหน้าที่แล้ว กลับโหมดเจ้าของ → ได้เมนูปกติ', client.last().includes('ถามเรื่องลูกค้าได้เลย'));
+    // ล้างกลับ ให้เทสส่วนถัดไปเริ่มจาก "ยังไม่มีฉบับไหน" เหมือนเดิม
+    await db.run('DELETE FROM brief_versions');
+    await db.run("DELETE FROM messages WHERE user_id IN ('U-new', 'U-setup')");
+    await db.removeOwner('U-setup');
+  }
   (await brief.syncBoot(db));
   check('บูตครั้งแรก → บันทึกฉบับจากไฟล์', (await brief.current(db)).SOURCE === 'file' && (await brief.current(db)).TEXT.includes('บ้านมะลิ'));
   (await brief.syncBoot(db));
@@ -130,9 +169,18 @@ async function main() {
   check('ไม่มีคำสั่ง = ไม่มีก้อนคำสั่งจากเจ้าของ', !systemPrompt({ briefText: '' }).includes('ยึดตามนี้เสมอ'));
   const op = ownerPrompt({ name: 'เอ', briefText: 'คำสั่งเดิม', report: 'สถิติ: x' });
   check('prompt เจ้าของมีคำสั่งเดิม + รายงาน + สั่งตอบ JSON', op.includes('คำสั่งเดิม') && op.includes('สถิติ: x') && op.includes('"new_brief"'));
+  check('ยังไม่มีหน้าที่ → AI ลูกค้าถูกสั่งไม่ให้ตอบเรื่องร้านเอง', systemPrompt({ briefText: '' }).includes('ยังไม่ได้บอกหน้าที่') && !sys.includes('ยังไม่ได้บอกหน้าที่'));
+  const setupP = ownerPrompt({ briefText: '' });
+  check('ยังไม่มีหน้าที่ → prompt เจ้าของพาตั้งหน้าที่ + มีแบบสำเร็จรูปเป็นโครง', setupP.includes('เพิ่งติดตั้ง') && setupP.includes('== ร้านขายของออนไลน์ ==') && !op.includes('เพิ่งติดตั้ง'));
+  check('มีร่างค้าง → prompt เจ้าของได้ร่างไปแก้ต่อ', ownerPrompt({ briefText: 'เดิม', draftText: 'ร่างใหม่ล่าสุด' }).includes('ร่างใหม่ล่าสุด'));
+  check('อ่านแบบสำเร็จรูปได้ครบ + ชื่อแบบจากบรรทัดแรก', brief.templates().length === templates.length && brief.templates().some((t) => t.label === 'ร้านขายของออนไลน์'));
+  check('โฟลเดอร์แบบหาย → ไม่ล้ม (ใช้โครง 4 หัวข้อแทน)', brief.templates('/no-such-dir').length === 0 && ownerPrompt({ briefText: '', templates: [] }).includes('4 หัวข้อ'));
 
   // ===== อ่านคำตอบ JSON ของโหมดเจ้าของ =====
-  check('JSON ปกติ', JSON.stringify(parseOwnerJSON('{"reply":"ได้ค่ะ","new_brief":null}')) === JSON.stringify({ reply: 'ได้ค่ะ', newBrief: null }));
+  check('JSON ปกติ', (() => { const p = parseOwnerJSON('{"reply":"ได้ค่ะ","new_brief":null}'); return p.ok && p.reply === 'ได้ค่ะ' && p.newBrief === null; })());
+  check('JSON ขาดกลางทาง → ไม่เอาเศษ JSON ไปตอบเจ้าของ (ให้ลองโมเดลถัดไป)', (() => { const p = parseOwnerJSON('{"reply":"ร่างให้แล้ว","new_brief":"คุณคือแอด'); return !p.ok && !p.reply; })());
+  check('ร่างที่ก๊อปหัว "== ชื่อแบบ ==" ติดมา → ตัดทิ้ง', parseOwnerJSON('{"reply":"x","new_brief":"== ร้านขายของออนไลน์ ==\\nคุณคือแอดมิน"}').newBrief === 'คุณคือแอดมิน');
+  check('โหมดเจ้าของ: gemini ก่อน (ตอบ JSON ครบ ไว) แล้ว deepseek สำรอง', JSON.stringify(require('../src/ai').ownerModels()) === JSON.stringify(['google/gemini-3.1-flash-lite', 'deepseek/deepseek-v4.1-flash']));
   check('JSON ห่อ ```json มา', parseOwnerJSON('```json\n{"reply":"แก้แล้ว","new_brief":"ใหม่"}\n```').newBrief === 'ใหม่');
   check('ไม่ใช่ JSON = ถือเป็นคำตอบ ไม่แตะคำสั่ง', (() => { const p = parseOwnerJSON('สวัสดีค่ะ'); return p.reply === 'สวัสดีค่ะ' && p.newBrief === null; })());
   check('new_brief ว่าง = ไม่แก้', parseOwnerJSON('{"reply":"x","new_brief":"  "}').newBrief === null);
@@ -353,6 +401,26 @@ async function main() {
     const bot = createBot({ client, ai, media: fakeMedia, env: ENV });
     await bot.handleEvent(textEvent('U-owner2', CODE));
     check('AI ล่มในโหมดเจ้าของ → ขอโทษ ไม่เงียบ', (await bot.handleEvent(textEvent('U-owner2', 'สรุปวันนี้'))) === 'error' && client.last().includes('ขอโทษ'));
+  }
+
+  // ===== AI ค้าง / ตอบขาดกลางทาง → ลองตัวถัดไป (client ปลอม ไม่ต่อเน็ต) =====
+  {
+    const aiMod = require('../src/ai');
+    const fakeOpenAI = (answers) => {
+      const asked = [];
+      return { asked, chat: { completions: { async create(body) { asked.push(body.model); const a = answers.shift(); if (a instanceof Error) throw a; return { choices: [{ finish_reason: a.finish || 'stop', message: { content: a.content } }] }; } } } };
+    };
+    let f = fakeOpenAI([{ content: '{"reply":"ร่างให้แล้ว","new_brief":"คุณคือแอด', finish: 'error' }, { content: '{"reply":"ร่างให้แล้วค่ะ","new_brief":"คุณคือแอดมิน"}' }]);
+    aiMod.setClient(f);
+    const r = await aiMod.ownerReply([{ role: 'user', type: 'text', text: 'ขายเสื้อ', ts: new Date().toISOString() }], {});
+    check('โหมดเจ้าของ: ตัวแรกขาดกลางทาง → ได้คำตอบครบจากตัวที่สอง', r.newBrief === 'คุณคือแอดมิน' && f.asked.length === 2 && f.asked[0] !== f.asked[1]);
+    f = fakeOpenAI([new Error('timeout'), new Error('terminated')]);
+    aiMod.setClient(f);
+    check('โหมดเจ้าของ: ล่มทั้งสองตัว → โยน error (บอทตอบ "ระบบสะดุด" ไม่ส่งเศษ)', await aiMod.ownerReply([{ role: 'user', type: 'text', text: 'x', ts: new Date().toISOString() }], {}).then(() => false, () => true));
+    f = fakeOpenAI([{ content: 'เสื้อยืดตัวละ 29', finish: 'error' }, { content: 'เสื้อยืดตัวละ 290 บาทค่ะ' }]);
+    aiMod.setClient(f);
+    check('ตอบลูกค้า: ตัวหลักขาดกลางทาง → ใช้คำตอบตัวสำรอง ไม่ส่งครึ่งประโยค', (await aiMod.chatReply([{ role: 'user', type: 'text', text: 'ราคา', ts: new Date().toISOString() }], {})) === 'เสื้อยืดตัวละ 290 บาทค่ะ');
+    aiMod.setClient(null);
   }
 
   // ===== ฐานข้อมูล: เลือกไฟล์ / Turso =====

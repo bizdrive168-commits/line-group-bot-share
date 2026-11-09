@@ -1,6 +1,7 @@
 // ตัวรับ event จาก LINE — คุยแชทส่วนตัว (1:1) เท่านั้น
 // แยกเป็น factory รับ client / db / ai / media จากข้างนอก เทสจะได้ส่งของปลอมเข้ามาได้โดยไม่ต้องต่อ LINE จริง
-const { BOT, SELF, EMOJI, say } = require('./branding');
+const branding = require('./branding'); // อ่าน branding.BOT / SELF ตอนใช้ (ชื่อมาจาก LINE หลังบูต)
+const { EMOJI, say } = branding;
 const brief = require('./brief');
 const owner = require('./owner');
 const { guardNumbers } = require('./guard');
@@ -39,7 +40,7 @@ function dailyLimit(env = process.env) {
 function greeting(env = process.env) {
   return (
     String(env.BOT_GREETING || '').trim() ||
-    `สวัสดีค่ะ ${BOT}ยินดีที่ได้รู้จักนะคะ ${EMOJI}\nพิมพ์ถาม ส่งรูป หรือส่งข้อความเสียงมาได้เลยค่ะ`
+    `สวัสดีค่ะ ${branding.BOT}ยินดีที่ได้รู้จักนะคะ ${EMOJI}\nพิมพ์ถาม ส่งรูป หรือส่งข้อความเสียงมาได้เลยค่ะ`
   );
 }
 
@@ -130,15 +131,16 @@ function createBot({ client, db = require('./db'), ai = require('./ai'), media =
     try {
       const history = await db.recentMessages(userId, 30, 'owner');
       const briefText = (await brief.current(db)).TEXT;
+      const draftText = (await db.getPendingBrief(userId))?.text || ''; // สั่งแก้ต่อจากร่างที่ยังไม่ยืนยัน
       const report = await owner.buildReport(db);
-      const { reply, newBrief } = await ai.ownerReply(history, { name: await db.userName(userId), briefText, report });
+      const { reply, newBrief } = await ai.ownerReply(history, { name: await db.userName(userId), briefText, draftText, report });
       // เจ้าของก็ต้องไม่ได้เบอร์/เลขบัญชีที่ AI แต่ง (เช็คเฉพาะคำตอบ ส่วนจุดเปลี่ยนในคำสั่งโค้ดคิดเอง)
-      out = guardNumbers(reply, [briefText, report, ...history.map((r) => r.text)]).text;
-      out = out || `${SELF}ยังตอบเรื่องนี้ไม่ได้ค่ะ ลองถามอีกแบบดูนะคะ`;
+      out = guardNumbers(reply, [briefText, draftText, report, ...history.map((r) => r.text)]).text;
+      out = out || `${branding.SELF}ยังตอบเรื่องนี้ไม่ได้ค่ะ ลองถามอีกแบบดูนะคะ`;
       if (newBrief) out = await owner.proposeBrief(userId, out, newBrief, db);
     } catch (e) {
       console.error('[owner-ai]', e.message);
-      await send(event.replyToken, userId, `ขอโทษนะคะ ระบบ${SELF}สะดุดนิดหน่อย ลองพิมพ์ใหม่อีกทีได้เลยค่ะ 🙏`);
+      await send(event.replyToken, userId, `ขอโทษนะคะ ระบบ${branding.SELF}สะดุดนิดหน่อย ลองพิมพ์ใหม่อีกทีได้เลยค่ะ 🙏`);
       return 'error';
     }
     await db.logMessage(userId, 'bot', null, 'text', say(out), 'owner');
@@ -155,7 +157,7 @@ function createBot({ client, db = require('./db'), ai = require('./ai'), media =
         await client
           .replyMessage({
             replyToken: event.replyToken,
-            messages: toMessages(`${BOT}คุยได้เฉพาะแชทส่วนตัวนะคะ แอดเพื่อนแล้วทักมาได้เลยค่ะ ${EMOJI}`),
+            messages: toMessages(`${branding.BOT}คุยได้เฉพาะแชทส่วนตัวนะคะ แอดเพื่อนแล้วทักมาได้เลยค่ะ ${EMOJI}`),
           })
           .catch(() => {});
       }
@@ -194,13 +196,13 @@ function createBot({ client, db = require('./db'), ai = require('./ai'), media =
     if (text && owner.isOwnerCode(text, env)) {
       await db.addOwner(userId);
       console.log(`[owner] เพิ่มเจ้าของ ${userId}`);
-      await send(event.replyToken, userId, `ยินดีต้อนรับค่ะ ${SELF}จำได้แล้วว่าคุณเป็นเจ้าของ\n\n${owner.menuText()}`);
+      await send(event.replyToken, userId, await owner.welcomeText(db)); // ยังไม่มีหน้าที่ = ชวนเล่าว่าอยากให้ทำอะไร
       return 'owner-added';
     }
     const mode = await db.ownerMode(userId); // null = ลูกค้า · owner · customer (เจ้าของทดลองคุยแบบลูกค้า)
     if (mode && text === 'กลับโหมดเจ้าของ') {
       await db.setOwnerMode(userId, 'owner');
-      await send(event.replyToken, userId, `กลับมาโหมดเจ้าของแล้วค่ะ\n\n${owner.menuText()}`);
+      await send(event.replyToken, userId, await owner.welcomeText(db, false));
       return 'owner-mode';
     }
     if (mode === 'owner') return ownerTurn(event, userId, msg, text);
@@ -208,7 +210,7 @@ function createBot({ client, db = require('./db'), ai = require('./ai'), media =
     // --- เพดานต่อวัน: ครบแล้วตอบสั้นๆ ไม่เรียก AI (เจ้าของไม่นับ) ---
     const limit = dailyLimit(env);
     if (!mode && limit && (await db.userMessagesToday(userId)) >= limit) {
-      await send(event.replyToken, null, `วันนี้คุยกับ${SELF}ครบ ${limit} ข้อความแล้วค่ะ พรุ่งนี้ทักมาใหม่ได้เลยนะคะ 🙏`);
+      await send(event.replyToken, null, `วันนี้คุยกับ${branding.SELF}ครบ ${limit} ข้อความแล้วค่ะ พรุ่งนี้ทักมาใหม่ได้เลยนะคะ 🙏`);
       return 'limit';
     }
 
@@ -223,10 +225,10 @@ function createBot({ client, db = require('./db'), ai = require('./ai'), media =
       answer = await ai.chatReply(history, { name: await db.userName(userId), briefText });
     } catch (e) {
       console.error('[ai]', e.message);
-      await send(event.replyToken, userId, `ขอโทษนะคะ ระบบ${SELF}สะดุดนิดหน่อย ลองพิมพ์ใหม่อีกทีได้เลยค่ะ 🙏`);
+      await send(event.replyToken, userId, `ขอโทษนะคะ ระบบ${branding.SELF}สะดุดนิดหน่อย ลองพิมพ์ใหม่อีกทีได้เลยค่ะ 🙏`);
       return 'error';
     }
-    if (!answer) answer = `ขอโทษค่ะ ${SELF}ยังตอบเรื่องนี้ไม่ได้ ลองพิมพ์อีกแบบดูนะคะ`;
+    if (!answer) answer = `ขอโทษค่ะ ${branding.SELF}ยังตอบเรื่องนี้ไม่ได้ ลองพิมพ์อีกแบบดูนะคะ`;
     // ด่านก่อนถึงลูกค้า: ช่อง 〔...〕 ที่ยังไม่กรอก + เลขบัญชี/เบอร์ที่ไม่มีอยู่จริงในข้อมูล
     const guarded = guardNumbers(brief.scrubPlaceholders(answer), [briefText, ...history.map((r) => r.text)]);
     if (guarded.removed.length) console.warn(`[guard] ตัดตัวเลขที่ไม่มีในข้อมูลออก: ${guarded.removed.join(', ')}`);

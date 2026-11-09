@@ -13,7 +13,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
-      "includeFiles": "{brief.txt,brief.example.txt}"
+      "includeFiles": "{brief.txt,brief.example.txt,briefs/*.txt}"
     }
   }
 }

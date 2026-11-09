@@ -1,6 +1,6 @@
 {
   "name": "line-chatbot",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "แชทบอทส่วนตัวใน LINE — สั่งหน้าที่ด้วย brief.txt มีแบบพร้อมใช้ 7 ธุรกิจ โหมดเจ้าของถามสรุปและแก้ราคาผ่านแชท รันบน Railway หรือ Vercel",
   "main": "src/index.js",
   "scripts": {
